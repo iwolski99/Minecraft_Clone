@@ -74,15 +74,15 @@ function buildCloudField(): Uint8Array {
   for (let i = 0; i < N * N; i++) {
     const v = n1[i] * 0.62 + n2[i] * 0.38;
     /*
-     * Threshold chosen for roughly a quarter of the field.
+     * Threshold chosen for roughly a third of the field.
      *
-     * The history here is a see-saw. At 0.60 only 19% of the sky carried cloud,
-     * so there was usually nothing overhead and the layer read only at a
-     * distance. Raised to 0.53 it reached 33% and the sky looked overcast - too
-     * much cover, spread too evenly, which is not what the original looks like.
-     * A quarter keeps clouds overhead often without closing the sky in.
+     * Set back to the value that was reported as looking right. Dropping it to
+     * 0.565 for a quarter cover was meant to reduce an overcast impression, but
+     * the sky is the one thing no headless render here can check - the reference
+     * rasteriser builds its triangles from chunk meshes and never draws the dome
+     * or the clouds - so a change made blind was a change made badly.
      */
-    out[i] = v > 0.565 ? 1 : 0;
+    out[i] = v > 0.53 ? 1 : 0;
   }
   /*
    * Break up any remaining slabs. Even at a higher frequency a smooth noise
@@ -367,19 +367,32 @@ export class Sky {
      * below a floor or they vanish against the dark.
      */
     /*
-     * Clouds are unlit white geometry, so the tint is applied by hand. The top
-     * of the range came down along with the coverage: at 0.88 opacity with pure
-     * white tops and a third of the sky covered, the layer read as a flat
-     * overcast sheet rather than as clouds against blue.
+     * Clouds are unlit white geometry, so the tint is applied by hand. Left at
+     * the values that were reported as looking right.
      */
     const mat = this.clouds.material as THREE.MeshBasicMaterial;
-    mat.opacity = 0.5 + dayFactor * 0.3;
+    mat.opacity = 0.55 + dayFactor * 0.33;
     mat.color.setRGB(
-      0.30 + dayFactor * 0.66,
-      0.31 + dayFactor * 0.65,
-      0.38 + dayFactor * 0.58,
+      0.34 + dayFactor * 0.66,
+      0.35 + dayFactor * 0.65,
+      0.42 + dayFactor * 0.58,
     );
     return s;
+  }
+
+  /**
+   * One line describing the cloud layer, for the debug overlay.
+   *
+   * The sky cannot be checked by any headless render here, so when clouds go
+   * missing the only way to find out why is to report what the layer actually
+   * is in the running game: how many cells are solid, where the mesh sits, and
+   * whether it is visible.
+   */
+  cloudDebug(): string {
+    const mat = this.clouds.material as THREE.MeshBasicMaterial;
+    const pos = this.clouds.geometry.attributes.position;
+    const n = pos ? pos.count : 0;
+    return `Clouds ${n} verts  pos ${this.clouds.position.x.toFixed(0)},${this.clouds.position.y.toFixed(0)},${this.clouds.position.z.toFixed(0)}  vis ${this.clouds.visible}  op ${mat.opacity.toFixed(2)}`;
   }
 
   /** Temporarily hide the sky so a diagnostics pass can measure terrain alone. */

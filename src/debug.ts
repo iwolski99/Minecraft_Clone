@@ -303,6 +303,7 @@ export class DebugConsole {
     lines.push(`Gen ${st.genMs.toFixed(1)}ms  Mesh ${st.meshMs.toFixed(1)}ms  RD ${g.settings.renderDistance}`);
     lines.push(`Entities ${g.mobs.entities.length}  Drops ${g.drops.count}  Particles ${g.particleSystem.activeCount}`);
     for (const line of g.cameraTrace.summary().split('\n')) lines.push(line);
+    lines.push(g.renderer3d.sky.cloudDebug());
     lines.push(`Mode ${g.player.gameMode}  ${g.player.flying ? 'flying' : g.player.onGround ? 'ground' : 'air'}  ${g.player.inWater ? 'water' : ''}`);
     for (const m of this.messages.slice(-4)) lines.push(`> ${m}`);
     return lines.join('\n');
