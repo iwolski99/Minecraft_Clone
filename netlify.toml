@@ -1,0 +1,29 @@
+# Netlify deployment.
+#
+# The build is a plain static site: dist/ contains index.html, diagnostic.html,
+# the self-contained cubeworld.html, the compiled ES modules under src/, and the
+# three.js runtime under vendor/. No server functions and no redirects are needed
+# because the game runs entirely in the browser.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# The ES modules are served with the correct MIME type by Netlify's static host.
+# Keep them revalidated so a redeploy is picked up immediately.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/vendor/three/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

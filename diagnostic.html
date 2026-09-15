@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <meta name="color-scheme" content="dark" />
+    <title>CubeWorld diagnostics</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23a03a3a'/><rect y='11' width='16' height='5' fill='%23322'/></svg>" />
+    <link rel="stylesheet" href="/src/ui/style.css" />
+    <style>
+      /* The panel must sit above every in-game UI layer (the highest is 60) and
+         it must survive the stylesheet's global user-select:none. */
+      #diag-panel {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        background: rgba(6, 8, 14, 0.9);
+        color: #d8e0ea;
+        font-family: 'Lucida Console', 'DejaVu Sans Mono', 'Courier New', monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        user-select: text;
+        -webkit-user-select: text;
+        pointer-events: auto;
+      }
+      #diag-status {
+        flex: 0 0 auto;
+        color: #ffd479;
+      }
+      #diag-report {
+        flex: 1 1 auto;
+        margin: 0;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: #0a0c12;
+        border: 1px solid #2a3140;
+        padding: 8px;
+      }
+      #diag-buttons {
+        flex: 0 0 auto;
+      }
+      #diag-buttons button {
+        font: inherit;
+        padding: 6px 14px;
+        color: #0d1016;
+        background: #9fd0ff;
+        border: 1px solid #cfe6ff;
+        cursor: pointer;
+      }
+      #diag-buttons button:hover {
+        background: #cfe6ff;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/vendor/three/three.module.js",
+          "three/": "/vendor/three/"
+        }
+      }
+    </script>
+    <script type="module" src="/src/diag.js"></script>
+  </body>
+</html>

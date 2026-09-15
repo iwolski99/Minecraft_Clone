@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.dev/
+.qa/
+.qa-build/
+.qa-build2/
+.typecheck/
+.npm-cache/
+# generated: the compiled scratch-check output, same role as .qa-build
+.mobbuild/
+*.log

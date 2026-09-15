@@ -1,0 +1,52 @@
+{
+  "name": "cubeworld",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "An original voxel survival sandbox built from scratch with TypeScript + Three.js",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs && node scripts/build-standalone.mjs",
+    "build:web": "node scripts/build.mjs",
+    "build:standalone": "node scripts/build.mjs && node scripts/build-standalone.mjs",
+    "typecheck": "node scripts/typecheck.mjs",
+    "preview": "node scripts/preview.mjs",
+    "qa": "node scripts/qa.mjs",
+    "qa:logic": "node scripts/qa.mjs logic",
+    "qa:mobs": "node scripts/qa.mjs mobs",
+    "qa:modules": "node scripts/qa.mjs modules",
+    "qa:runtime": "node scripts/qa.mjs runtime",
+    "qa:renderpath": "node scripts/qa.mjs renderpath",
+    "qa:uv": "node scripts/qa.mjs uv",
+    "qa:uvflip": "node scripts/qa.mjs uvflip",
+    "qa:alpha": "node scripts/qa.mjs alpha",
+    "qa:attrib": "node scripts/qa.mjs attrib",
+    "qa:player": "node scripts/qa.mjs player",
+    "qa:inventory": "node scripts/qa.mjs inventory",
+    "qa:blocks": "node scripts/qa.mjs blocks",
+    "qa:textures": "node scripts/qa.mjs textures",
+    "qa:stream": "node scripts/qa.mjs stream",
+    "qa:spawn": "node scripts/qa.mjs spawn",
+    "qa:atlas": "node scripts/qa.mjs atlas",
+    "qa:world": "node scripts/qa.mjs world",
+    "qa:render": "node scripts/qa.mjs render",
+    "qa:bundle": "node scripts/qa-bundle.mjs dist",
+    "qa:standalone": "node scripts/qa-standalone.mjs",
+    "qa:probe": "node scripts/qa-probe.mjs",
+    "qa:served": "node scripts/qa-served.mjs",
+    "verify": "node scripts/typecheck.mjs && node scripts/qa.mjs modules && node scripts/qa.mjs shaders && node scripts/qa.mjs logic && node scripts/qa.mjs attrib && node scripts/qa.mjs uvflip && node scripts/qa.mjs uv && node scripts/qa.mjs alpha && node scripts/qa.mjs textures && node scripts/qa.mjs blocks && node scripts/qa.mjs water && node scripts/qa.mjs watermesh && node scripts/qa.mjs light && node scripts/qa.mjs inventory && node scripts/qa.mjs player && node scripts/qa.mjs camtrace && node scripts/qa.mjs mobs && node scripts/qa.mjs spawn && node scripts/qa.mjs stream && node scripts/qa.mjs trees && node scripts/qa.mjs models && node scripts/qa.mjs renderpath && node scripts/qa.mjs runtime && node scripts/build.mjs && node scripts/build-standalone.mjs && node scripts/qa-bundle.mjs dist && node scripts/qa-standalone.mjs",
+    "qa:light": "node scripts/qa.mjs light",
+    "qa:shaders": "node scripts/qa.mjs shaders",
+    "qa:watermesh": "node scripts/qa.mjs watermesh",
+    "qa:water": "node scripts/qa.mjs water",
+    "qa:camtrace": "node scripts/qa.mjs camtrace"
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.169.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}

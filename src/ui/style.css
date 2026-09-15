@@ -1,0 +1,770 @@
+/* ==================================================================
+   CubeWorld UI
+   Deliberately classic: square pixel slots, beveled grey borders, dark
+   translucent panels, no rounded corners or gradients anywhere.
+   ================================================================== */
+
+:root {
+  --slot: 44px;
+  --slot-bg: #8b8b8b;
+  --slot-dark: #373737;
+  --panel-dark: #565656;
+  --text: #f4f4f4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: var(--text);
+  font-family: 'Lucida Console', 'DejaVu Sans Mono', 'Courier New', monospace;
+  -webkit-font-smoothing: none;
+  user-select: none;
+  touch-action: none;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+canvas#game {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+img,
+canvas.icon {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+#ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Text                                                                */
+/* ------------------------------------------------------------------ */
+
+.pixel-text {
+  font-family: 'Lucida Console', 'DejaVu Sans Mono', 'Courier New', monospace;
+  letter-spacing: 0.5px;
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.7);
+}
+
+.title-text {
+  font-size: 44px;
+  letter-spacing: 3px;
+  color: #e8e8e8;
+  text-shadow: 4px 4px 0 #2c2c2c, 0 0 18px rgba(120, 200, 255, 0.35);
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons                                                             */
+/* ------------------------------------------------------------------ */
+
+.btn {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  margin: 6px 0;
+  font: inherit;
+  font-size: 15px;
+  color: #f0f0f0;
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.65);
+  background: #6f6f6f;
+  border: 2px solid #2b2b2b;
+  box-shadow: inset 2px 2px 0 rgba(255, 255, 255, 0.28), inset -2px -2px 0 rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  pointer-events: auto;
+  text-align: center;
+  image-rendering: pixelated;
+}
+
+.btn:hover:not(:disabled) {
+  background: #7f8f7f;
+  border-color: #ffffff;
+}
+
+.btn:active:not(:disabled) {
+  background: #5a6a5a;
+  box-shadow: inset -2px -2px 0 rgba(255, 255, 255, 0.2), inset 2px 2px 0 rgba(0, 0, 0, 0.35);
+}
+
+.btn:disabled {
+  color: #9a9a9a;
+  background: #4d4d4d;
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------ */
+/* Screens                                                             */
+/* ------------------------------------------------------------------ */
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 16, 0.72);
+  pointer-events: auto;
+  z-index: 20;
+}
+
+.screen-panel {
+  background: rgba(16, 18, 26, 0.92);
+  border: 3px solid #2b2b2b;
+  box-shadow: inset 3px 3px 0 rgba(255, 255, 255, 0.15), inset -3px -3px 0 rgba(0, 0, 0, 0.45),
+    0 0 0 3px rgba(0, 0, 0, 0.4);
+  padding: 22px 26px;
+  min-width: 380px;
+  max-width: 92vw;
+  max-height: 92vh;
+  overflow: auto;
+}
+
+.screen-panel h2 {
+  margin: 0 0 14px;
+  font-size: 20px;
+  text-align: center;
+  letter-spacing: 1px;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+  font-size: 14px;
+}
+
+.field label {
+  min-width: 130px;
+  color: #d8d8d8;
+}
+
+input[type='text'],
+input[type='number'],
+select {
+  flex: 1;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 14px;
+  color: #f0f0f0;
+  background: #1b1d26;
+  border: 2px solid #454a5c;
+  outline: none;
+  pointer-events: auto;
+}
+
+input[type='text']:focus,
+input[type='number']:focus {
+  border-color: #8fb4e0;
+}
+
+input[type='range'] {
+  flex: 1;
+  accent-color: #7fae6a;
+  pointer-events: auto;
+}
+
+.mode-toggle {
+  display: flex;
+  gap: 0;
+  margin: 4px 0 10px;
+}
+
+.mode-toggle button {
+  flex: 1;
+  padding: 9px;
+  font: inherit;
+  font-size: 14px;
+  color: #ddd;
+  background: #3a3d49;
+  border: 2px solid #22242c;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.mode-toggle button.active {
+  background: #6a8f5a;
+  color: #fff;
+  border-color: #cfe8c0;
+}
+
+.world-list {
+  max-height: 220px;
+  overflow: auto;
+  margin: 8px 0;
+  border: 2px solid #2b2b2b;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.world-entry {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  pointer-events: auto;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.world-entry:hover {
+  background: rgba(120, 180, 255, 0.16);
+}
+
+.world-entry .meta {
+  color: #9aa4b4;
+  font-size: 11px;
+}
+
+.hint {
+  font-size: 11px;
+  color: #9aa4b4;
+  text-align: center;
+  margin-top: 12px;
+  line-height: 1.6;
+}
+
+/* ------------------------------------------------------------------ */
+/* Loading                                                             */
+/* ------------------------------------------------------------------ */
+
+#loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #0d1017;
+  z-index: 60;
+  pointer-events: auto;
+}
+
+.loading-title {
+  font-size: 22px;
+  margin-bottom: 18px;
+  letter-spacing: 2px;
+}
+
+.progress-outer {
+  width: 340px;
+  height: 14px;
+  background: #1b1f2a;
+  border: 2px solid #3c4356;
+  padding: 2px;
+}
+
+.progress-inner {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(#9ede6a, #5f9a3a);
+  transition: width 0.12s linear;
+}
+
+.loading-message {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #93a0b4;
+}
+
+/* ------------------------------------------------------------------ */
+/* HUD                                                                 */
+/* ------------------------------------------------------------------ */
+
+#hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  mix-blend-mode: exclusion;
+  opacity: 0.9;
+}
+
+#crosshair::before,
+#crosshair::after {
+  content: '';
+  position: absolute;
+  background: #ffffff;
+}
+
+#crosshair::before {
+  left: 50%;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  transform: translateX(-50%);
+}
+
+#crosshair::after {
+  top: 50%;
+  left: 0;
+  height: 2px;
+  width: 100%;
+  transform: translateY(-50%);
+}
+
+#bottom-hud {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+#stats-bars {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 2px;
+  gap: 40px;
+  min-height: 20px;
+}
+
+.bar-row {
+  display: flex;
+  gap: 1px;
+  height: 18px;
+}
+
+.bar-icon {
+  width: 18px;
+  height: 18px;
+  image-rendering: pixelated;
+}
+
+#air-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1px;
+  height: 16px;
+  width: 100%;
+}
+
+#hotbar {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(20, 22, 28, 0.62);
+  border: 2px solid rgba(10, 10, 12, 0.85);
+}
+
+.hotbar-slot {
+  position: relative;
+  width: var(--slot);
+  height: var(--slot);
+  background: rgba(139, 139, 139, 0.42);
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.hotbar-slot.selected {
+  border-color: #ffffff;
+  background: rgba(220, 220, 220, 0.4);
+  transform: scale(1.06);
+  z-index: 2;
+}
+
+.slot-count {
+  position: absolute;
+  right: 2px;
+  bottom: 0px;
+  font-size: 13px;
+  color: #fff;
+  text-shadow: 2px 2px 0 #000;
+  pointer-events: none;
+}
+
+.durability {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  bottom: 3px;
+  height: 3px;
+  background: #000;
+}
+
+.durability > i {
+  display: block;
+  height: 100%;
+  background: #4ee04e;
+}
+
+#item-name {
+  position: absolute;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  font-size: 14px;
+  color: #fff;
+  text-shadow: 2px 2px 0 #000;
+  opacity: 0;
+  transition: opacity 0.4s;
+  white-space: nowrap;
+}
+
+#item-name.show {
+  opacity: 1;
+}
+
+#debug {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #fff;
+  text-shadow: 1px 1px 0 #000, 2px 2px 0 rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 6px 8px;
+  white-space: pre;
+  max-width: 46vw;
+}
+
+#toast {
+  position: absolute;
+  left: 50%;
+  top: 18%;
+  transform: translateX(-50%);
+  font-size: 14px;
+  color: #ffe9a0;
+  text-shadow: 2px 2px 0 #000;
+  opacity: 0;
+  transition: opacity 0.35s;
+  text-align: center;
+}
+
+#toast.show {
+  opacity: 1;
+}
+
+#click-hint {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 16px;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  padding: 10px 22px;
+  letter-spacing: 1px;
+  text-shadow: 2px 2px 0 #000;
+  pointer-events: none;
+}
+
+#damage-flash {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(180, 0, 0, 0) 35%, rgba(180, 0, 0, 0.55) 100%);
+  opacity: 0;
+  transition: opacity 0.18s;
+}
+
+#water-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(40, 90, 170, 0.34);
+  opacity: 0;
+}
+
+#vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.35) 100%);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Containers (inventory / crafting / furnace / chest)                 */
+/* ------------------------------------------------------------------ */
+
+#container-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 25;
+  pointer-events: auto;
+}
+
+.container-panel {
+  background: #c6c6c6;
+  border: 3px solid #565656;
+  box-shadow: inset 3px 3px 0 #ffffff, inset -3px -3px 0 #8b8b8b, 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 12px;
+  color: #3f3f3f;
+  max-height: 92vh;
+  overflow: auto;
+}
+
+.container-title {
+  font-size: 14px;
+  margin-bottom: 8px;
+  color: #3f3f3f;
+  text-shadow: none;
+}
+
+.slot-grid {
+  display: grid;
+  gap: 2px;
+}
+
+.slot {
+  position: relative;
+  width: var(--slot);
+  height: var(--slot);
+  background: #8b8b8b;
+  border: 2px solid #373737;
+  box-shadow: inset 2px 2px 0 rgba(255, 255, 255, 0.33), inset -2px -2px 0 rgba(0, 0, 0, 0.33);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.slot:hover {
+  background: #a5a5a5;
+}
+
+.slot .icon {
+  width: 76%;
+  height: 76%;
+  pointer-events: none;
+}
+
+.craft-area {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.craft-arrow {
+  font-size: 22px;
+  color: #5a5a5a;
+  padding: 0 4px;
+}
+
+.result-slot {
+  background: #9d9d9d;
+}
+
+#cursor-stack {
+  position: fixed;
+  width: 40px;
+  height: 40px;
+  pointer-events: none;
+  z-index: 50;
+  transform: translate(-50%, -50%);
+  display: none;
+}
+
+#cursor-stack.visible {
+  display: block;
+}
+
+#cursor-stack .slot-count {
+  right: 0;
+  bottom: -2px;
+}
+
+.tooltip {
+  position: fixed;
+  background: rgba(16, 0, 32, 0.92);
+  border: 1px solid #4b2a8a;
+  color: #fff;
+  font-size: 12px;
+  padding: 4px 8px;
+  pointer-events: none;
+  z-index: 60;
+  white-space: nowrap;
+}
+
+.furnace-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.furnace-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.flame {
+  width: 24px;
+  height: 26px;
+  background: #6b6b6b;
+  position: relative;
+  overflow: hidden;
+}
+
+.flame > i {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  background: #ff9a1c;
+}
+
+.arrow-progress {
+  width: 44px;
+  height: 12px;
+  background: #6b6b6b;
+  position: relative;
+  overflow: hidden;
+}
+
+.arrow-progress > i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: #e8e8e8;
+}
+
+/* ------------------------------------------------------------------ */
+/* Death screen                                                        */
+/* ------------------------------------------------------------------ */
+
+#death-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(120, 10, 10, 0.45);
+  z-index: 40;
+  pointer-events: auto;
+}
+
+#death-screen h1 {
+  font-size: 42px;
+  letter-spacing: 3px;
+  text-shadow: 4px 4px 0 rgba(0, 0, 0, 0.6);
+  margin-bottom: 20px;
+}
+
+#death-screen .btn {
+  width: 260px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Panorama title background                                           */
+/* ------------------------------------------------------------------ */
+
+#panorama {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+.title-wrap {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 340px;
+}
+
+.title-logo {
+  margin-bottom: 26px;
+  text-align: center;
+}
+
+.title-sub {
+  font-size: 12px;
+  color: #cfd8e6;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.version-tag {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  font-size: 11px;
+  color: #cfd8e6;
+  z-index: 3;
+}
+
+.controls-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 16px;
+  font-size: 12.5px;
+  margin: 6px 0 12px;
+}
+
+.controls-grid b {
+  color: #ffe9a0;
+  font-weight: normal;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* F1 hides the in-game overlay without pausing */
+#hud-root.hud-hidden > *:not(#damage-flash):not(#water-overlay) {
+  display: none !important;
+}
+
+#debug-root,
+#screen-root,
+#container-root {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#hud-root {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
