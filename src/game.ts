@@ -474,10 +474,23 @@ export class Game {
       // per frame against recent history - see LookGate for why a per-event size
       // test cannot work: the spurious and legitimate ranges overlap.
       this.cameraTrace.recordEvent(rawX, rawY);
-      const dx = clampLookDelta(rawX);
-      const dy = clampLookDelta(rawY);
-      this.lookDeltaX += dx;
-      this.lookDeltaY += dy;
+      /*
+       * Deliberately NOT clamped per event any more.
+       *
+       * The +/-180 clamp was hiding the bug from the thing meant to catch it. A
+       * captured session shows eight jolts that applied exactly 180 px - every
+       * one a single spurious report of 183-543 px truncated to exactly the
+       * clamp. 543 px in one frame is 12000 px/s and unmistakable; 180 px is
+       * 2100-4000 px/s at this game's frame times, which is ordinary fast
+       * turning. The clamp took an impossible report and handed the gate a
+       * plausible one, so the gate passed it and the player got 13.6 degrees.
+       *
+       * The gate judges the frame's true magnitude instead. Bounding the size
+       * here cannot help anyway: it caps the jolt without removing it, which is
+       * what "reduced the jolts from 141 to 11 degrees" meant.
+       */
+      this.lookDeltaX += rawX;
+      this.lookDeltaY += rawY;
     });
     this.canvas.addEventListener('mousedown', (e) => {
       if (!this.running) return;

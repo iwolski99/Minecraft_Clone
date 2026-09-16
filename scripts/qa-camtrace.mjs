@@ -574,16 +574,57 @@ export async function run(load) {
     const { LookGate } = await load('player/look.js');
     const DT = 0.045;
 
-    // sustained: a hard flick out of near-stillness loses nothing
+    /*
+     * Sustained motion loses nothing, but it takes two confirming frames rather
+     * than one. A single confirming frame is not evidence: a real capture shows
+     * a 212 px spurious report held correctly and then a SECOND spurious report
+     * 41 ms later, which the old one-frame rule read as the motion continuing -
+     * releasing both and applying 360 px, 27 degrees, in one frame.
+     */
     const g1 = new LookGate();
     const slow = [5, 6, 5, 7, 6, 5, 6, 5];
     for (const v of slow) g1.check(v, 0, DT);
     const first = g1.check(400, 0, DT)[0];
     const second = g1.check(420, 0, DT)[0];
-    info(`hard flick from rest: frame 1 applies ${first.toFixed(0)} px, frame 2 applies ${second.toFixed(0)} px`);
+    const third = g1.check(410, 0, DT)[0];
+    info(`hard flick from rest: frames apply ${first.toFixed(0)} / ${second.toFixed(0)} / ${third.toFixed(0)} px`);
     check('the first frame of a hard flick is held, not applied', first === 0, String(first));
-    check('the held movement comes back in full on the next frame', Math.abs(second - (400 + 420)) < 1e-9, String(second));
+    check('one confirming frame is not enough to release', second === 0, String(second));
+    check('the held movement comes back in full once confirmed', Math.abs(third - (400 + 420 + 410)) < 1e-9, String(third));
     check('nothing is lost across the deferral', g1.released === 1 && g1.discarded === 0, `${g1.released}/${g1.discarded}`);
+
+    /*
+     * The captured 27.2 degree jolt, as a regression test. Two spurious reports
+     * in a row - which this mouse produces, four inside 213 ms in the same
+     * capture - must BOTH be discarded, not mistaken for a sweep.
+     */
+    const burst = new LookGate();
+    for (const v of [10, 12, 9, 11, 10, 13, 9, 12]) burst.check(v, 0, DT);
+    const b1 = burst.check(212, 0, 0.041)[0];
+    const b2 = burst.check(197, 0, 0.041)[0];
+    const b3 = burst.check(9, 0, DT)[0];
+    const worstBurst = Math.max(Math.abs(b1), Math.abs(b2), Math.abs(b3)) * 0.00132;
+    info(`captured burst 212+197 px: applies ${b1}/${b2}/${b3} px, worst ${((worstBurst * 180) / Math.PI).toFixed(1)} deg`);
+    check('a burst of two spurious reports applies nothing', b1 === 0 && b2 === 0, `${b1}/${b2}`);
+    check('the burst does not leak into the frame after it', b3 === 9, String(b3));
+    check('the captured 27 degree jolt is gone', (worstBurst * 180) / Math.PI < 1, `${((worstBurst * 180) / Math.PI).toFixed(1)} deg`);
+
+    /*
+     * Why the per-event clamp had to go. It truncated every spurious report to
+     * exactly 180 px, and 180 px over this game's frame times is 2100-4000 px/s
+     * - ordinary fast turning. The clamp turned an impossible report into a
+     * plausible one and the gate passed it, eight times in one capture, at 13.6
+     * degrees each. Judged at its true size the same report is unmistakable.
+     */
+    const trueSize = new LookGate();
+    for (const v of [10, 12, 9, 11, 10, 13, 9, 12]) trueSize.check(v, 0, DT);
+    const unclamped = trueSize.check(543, 0, DT)[0];
+    const clamped = new LookGate();
+    for (const v of [10, 12, 9, 11, 10, 13, 9, 12]) clamped.check(v, 0, 0.060);
+    const asClamped = clamped.check(180, 0, 0.060)[0];
+    info(`a 543 px report judged at true size applies ${unclamped} px; the same report clamped to 180 applies ${asClamped} px`);
+    check('a spurious report is stopped when judged at its true size', unclamped === 0, String(unclamped));
+    check('...and would have sailed through if clamped to 180 first', asClamped === 180, String(asClamped));
 
     // impulse: a lone spike followed by normal motion is discarded
     const g2 = new LookGate();

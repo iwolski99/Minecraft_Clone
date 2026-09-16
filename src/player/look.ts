@@ -157,6 +157,26 @@ export class LookGate {
    * motion to count as sustained, and the held movement to be released.
    */
   private static readonly SUSTAIN = 0.5;
+  /**
+   * How many consecutive sustained frames must follow a held one before the
+   * held movement is believed and released.
+   *
+   * One is not enough. A captured session shows a 212 px spurious report held
+   * correctly, and then a *second* spurious report 41 ms later - which the gate
+   * read as the motion continuing, so it released the held movement plus the new
+   * frame's and applied 360 px, 27 degrees, in a single frame. The assumption
+   * that "a spike is lone and a sweep is a run" is simply false for this mouse:
+   * the spurious reports arrive in bursts, four inside 213 ms in the same
+   * capture.
+   *
+   * Two confirming frames costs a genuine hard flick two frames of latency and
+   * nothing else - the movement is still released in full. Measured against a
+   * realistic session the gate is not reached at all, so that cost is never paid
+   * in ordinary play.
+   */
+  private static readonly CONFIRM = 2;
+  /** Never hold movement longer than this, however ambiguous it looks. */
+  private static readonly MAX_HOLD = 3;
 
   /** Frames held back as suspect, and the largest held magnitude. */
   rejected = 0;
@@ -168,11 +188,14 @@ export class LookGate {
   released = 0;
   discarded = 0;
 
-  /** movement held from the previous frame, pending the next frame's verdict */
+  /** movement held from the previous frame(s), pending a verdict */
   private heldX = 0;
   private heldY = 0;
   private heldRate = 0;
   private holding = false;
+  /** frames spent holding, and consecutive frames that looked sustained */
+  private holdFrames = 0;
+  private sustainRun = 0;
 
   private median(): number {
     if (this.recent.length === 0) return 0;
@@ -193,35 +216,35 @@ export class LookGate {
     const mag = Math.hypot(dx, dy);
     const rate = mag / step;
 
-    // Settle whatever the previous frame held back before judging this one.
-    let heldX = 0;
-    let heldY = 0;
-    let sustained = false;
+    // Settle whatever the previous frame(s) held back before judging this one.
     if (this.holding) {
-      sustained = rate >= this.heldRate * LookGate.SUSTAIN;
-      if (sustained) {
-        heldX = this.heldX;
-        heldY = this.heldY;
-        this.released++;
-      } else {
-        this.discarded++;
+      const sustained = rate >= this.heldRate * LookGate.SUSTAIN;
+      if (sustained && this.holdFrames < LookGate.MAX_HOLD) {
+        this.sustainRun++;
+        if (this.sustainRun >= LookGate.CONFIRM) {
+          // Believed: a real sweep. Give back everything, and rebuild the
+          // baseline around the new rate rather than the slow motion before it.
+          const outX = dx + this.heldX;
+          const outY = dy + this.heldY;
+          this.released++;
+          this.forget();
+          this.recent.length = 0;
+          this.recent.push(rate);
+          this.accepted++;
+          if (mag > this.worstAccepted) this.worstAccepted = mag;
+          return [outX, outY];
+        }
+        // Not yet confirmed - keep holding, and hold this frame too.
+        this.heldX += dx;
+        this.heldY += dy;
+        this.holdFrames++;
+        return [0, 0];
       }
-      this.holding = false;
-      this.heldX = 0;
-      this.heldY = 0;
-      // Either way this frame is taken at face value: a held frame must never be
-      // followed by another held frame, or a player holding a genuinely fast turn
-      // would never get their movement back.
-      if (sustained) {
-        // The new rate is the norm now - rebuild the baseline around it rather
-        // than judging the rest of the sweep against the slow motion before it.
-        this.recent.length = 0;
-      }
-      this.recent.push(rate);
-      if (this.recent.length > LookGate.WINDOW) this.recent.shift();
-      this.accepted++;
-      if (mag > this.worstAccepted) this.worstAccepted = mag;
-      return [dx + heldX, dy + heldY];
+      // The motion did not continue, or it has been ambiguous for too long:
+      // a lone impulse, or a burst of them. Drop all of it.
+      this.discarded++;
+      this.forget();
+      // and fall through to judge this frame on its own merits
     }
 
     const med = this.median();
@@ -233,6 +256,8 @@ export class LookGate {
       this.heldX = dx;
       this.heldY = dy;
       this.heldRate = rate;
+      this.holdFrames = 1;
+      this.sustainRun = 0;
       if (mag > this.worstRejected) this.worstRejected = mag;
       // A held frame deliberately does not enter the baseline, or one spike
       // would raise the bar enough to let its successors through.
@@ -256,6 +281,8 @@ export class LookGate {
     this.heldX = 0;
     this.heldY = 0;
     this.heldRate = 0;
+    this.holdFrames = 0;
+    this.sustainRun = 0;
   }
 
   reset(): void {
