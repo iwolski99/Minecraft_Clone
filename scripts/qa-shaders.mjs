@@ -208,6 +208,75 @@ export async function run() {
     }
   }
 
+  /*
+   * Block scope.
+   *
+   * A variable declared inside an `if` and used after it is a compile error in
+   * GLSL, and it takes the whole stage down: the fragment shader does not
+   * compile, three.js draws nothing for that material, and the only trace is a
+   * line in the browser console. That is how the sky silently became a flat
+   * sheet - `vec3 dn` was declared inside the star block and the aurora further
+   * down used it. The result was no gradient, no stars and a different colour by
+   * day, reported as "the sky looks overcast", and it could not be found from
+   * inside this repo at all.
+   *
+   * The check tracks brace depth. A use shallower than its declaration is
+   * definitely out of scope. A use at the same depth in a *sibling* block is not
+   * caught, which errs toward silence rather than false alarms.
+   */
+  const scopeErrors = [];
+  for (const [name, body] of shaders) {
+    const code = body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    /*
+     * Track block *identity*, not depth.
+     *
+     * Comparing depth alone cannot see this bug at all: the star block and the
+     * aurora block are siblings at the same depth, so a declaration in one and a
+     * use in the other look identical to a use in the same scope. A variable is
+     * visible only if the chain of blocks it was declared in is a prefix of the
+     * chain where it is used.
+     */
+    const declared = new Map(); // identifier -> array of enclosing block ids
+    const stack = [];
+    let nextBlock = 0;
+    const tokenRe = /\{|\}|[A-Za-z_]\w*|\d+\.?\d*/g;
+    const tokens = [];
+    for (const m of code.matchAll(tokenRe)) tokens.push({ text: m[0] });
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i].text;
+      if (t === '{') {
+        stack.push(nextBlock++);
+        continue;
+      }
+      if (t === '}') {
+        stack.pop();
+        continue;
+      }
+      const isIdent = /^[A-Za-z_]\w*$/.test(t);
+      const prev = tokens[i - 1]?.text;
+      if (isIdent && /^(float|int|bool|vec[234]|mat[234]|sampler2D)$/.test(prev ?? '')) {
+        declared.set(t, stack.slice());
+        continue;
+      }
+      if (!isIdent) continue;
+      const scope = declared.get(t);
+      if (!scope) continue;
+      // visible only when the declaration's block chain encloses the use
+      const encloses = scope.length <= stack.length && scope.every((b, k) => stack[k] === b);
+      if (!encloses) {
+        scopeErrors.push(
+          `${name}: ${t} is declared inside a block but used outside it`,
+        );
+      }
+    }
+  }
+  if (scopeErrors.length) info(`shader scope errors: ${[...new Set(scopeErrors)].slice(0, 4).join(' | ')}`);
+  check(
+    'no shader uses a variable outside the block it was declared in',
+    scopeErrors.length === 0,
+    `${scopeErrors.length} out-of-scope use(s)`,
+  );
+
   console.log(`shaders: ${pass} passed, ${fail} failed`);
   if (fail) process.exit(1);
 }

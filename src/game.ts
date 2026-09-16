@@ -41,6 +41,7 @@ const DOOR_SWAP: Record<number, [number, number]> = {
   [B.oak_door_open]: [B.oak_door, B.oak_door_top],
   [B.oak_door_open_top]: [B.oak_door, B.oak_door_top],
 };import { clampLookDelta, wrapYaw, capFrameLook, LookGate } from './player/look.js';
+import { installShaderFaultCapture } from './render/shaderFaults.js';
 import { CameraTrace } from './player/camtrace.js';
 
 type Weather = 'clear' | 'rain' | 'snow';
@@ -132,6 +133,9 @@ export class Game {
     // a placeholder world so the renderer can be constructed before a save loads
     const gen = new TerrainGenerator(1);
     this.world = new World(1, gen);
+    // Installed before any material exists, so a shader that fails to compile is
+    // recorded here rather than only reaching a browser console nothing can read.
+    installShaderFaultCapture();
     this.renderer3d = new Renderer(canvas, this.atlas, this.itemAtlas, this.world);
 
     // The host object is captured by the mob manager, so every field is a live

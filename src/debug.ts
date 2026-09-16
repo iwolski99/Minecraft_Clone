@@ -8,6 +8,7 @@
 import type { Game } from './game.js';
 import { CHUNK_Y } from './world/chunk.js';
 import { itemDisplay } from './items/items.js';
+import { shaderFaultLine } from './render/shaderFaults.js';
 
 const HELP = [
   '/help                 list commands',
@@ -304,6 +305,7 @@ export class DebugConsole {
     lines.push(`Entities ${g.mobs.entities.length}  Drops ${g.drops.count}  Particles ${g.particleSystem.activeCount}`);
     for (const line of g.cameraTrace.summary().split('\n')) lines.push(line);
     lines.push(g.renderer3d.sky.cloudDebug());
+    lines.push(shaderFaultLine());
     lines.push(`Mode ${g.player.gameMode}  ${g.player.flying ? 'flying' : g.player.onGround ? 'ground' : 'air'}  ${g.player.inWater ? 'water' : ''}`);
     for (const m of this.messages.slice(-4)) lines.push(`> ${m}`);
     return lines.join('\n');

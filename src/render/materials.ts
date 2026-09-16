@@ -321,6 +321,18 @@ void main() {
   col += uSunColor * pow(sd, 6.0) * 0.22 * uSunIntensity;
 
   /*
+   * Normalised once, at function scope.
+   *
+   * It was declared inside the star block below, and the aurora further down
+   * used it - which is a scope error in GLSL, not a warning. The whole fragment
+   * shader failed to compile, so the dome drew nothing at all and the sky became
+   * the clear colour: no gradient, no stars, a flat sheet at every hour. Two of
+   * the three symptoms reported from play came from this one line being in the
+   * wrong place.
+   */
+  vec3 dn = normalize(d);
+
+  /*
    * Stars.
    *
    * The previous version lit an entire cell of a slanted 2D projection of the
@@ -337,7 +349,6 @@ void main() {
    * independently, which is what the original's sky looks like.
    */
   if (uStarAmount > 0.001 && h > 0.02) {
-    vec3 dn = normalize(d);
     vec3 starCell = floor(dn * 130.0);
     // hash() takes a vec2, and GLSL has no implicit vec3 -> vec2 conversion:
     // passing a vec3 here is a compile error, which fails the whole sky shader

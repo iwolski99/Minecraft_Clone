@@ -148,3 +148,108 @@ made `verify` randomly red. Two causes: the suite seeded terrain but let
 `MobManager` seed itself from `Math.random()`; and the persistence check counted
 in-flight arrows as "alive" when `createMob()` has no projectile spec and cannot
 restore them. Now deterministic, 25/25.
+
+---
+
+# Addendum, from the author of the original handoff
+
+Written after Claude's rewrite, from a later capture. **Read this as a
+supplement, not a correction** — the defer design is better than what it
+replaced, and the pointer-lock rule-out below is now settled by measurement.
+
+## What this capture confirms
+
+- **Pointer lock is conclusively ruled out**, independently: `total time
+  unlocked 0 ms over 2 transitions`, and 41 of 42 zero-input runs happen with the
+  lock held. Matches Claude's 224-second capture. Do not revisit.
+- `unexplained 0` still holds across every frame.
+
+## A leak that the defer design still has
+
+From a 673-frame capture. Anomalies split into applied and refused, and the split
+does not follow the size of the event:
+
+```
+APPLIED
+  41465  14 events  rawX 3170  spike 507  ->  5.074 rad = 290 degrees
+  41834   7 events  rawX  972  spike 480  ->  1.283 rad =  73 degrees
+  35376   5 events  rawX -582  spike 497  ->  0.768 rad =  44 degrees
+REFUSED (dYaw zero)
+  43113   6 events  rawX 1006  spike 480
+  20003   6 events  rawX -1148 spike 507
+  16870   6 events  rawX 1377  spike 523
+```
+
+Both groups contain a ~480-507 px single event. What differs is what preceded
+them. In `check()`:
+
+```ts
+const sustained = rate >= this.heldRate * LookGate.SUSTAIN;
+...
+const outX = dx + this.heldX;   // released in full
+```
+
+The confirmation compares the current rate against the **held** rate. A 3170 px
+frame measured against a small held frame passes trivially, and `outX` then
+applies the enormous current frame unexamined. Confirmation answers *"did the
+motion continue?"*; nothing answers *"could the mouse have moved that far at
+all?"*
+
+## A frame-rate ceiling does NOT fix this — tried, and it was wrong
+
+Adding an absolute ceiling of 9000 px/s broke 7 of the 99 checks, correctly:
+
+```
+FAIL a sustained fast turn is never locked out 0/20000
+```
+
+The suite treats **500 px/frame** as legitimate, which at 60 FPS is **30,000
+px/s**, while the spurious bursts are **10,700-13,000 px/s** (480-523 px in a
+40-45 ms frame). **No frame-rate ceiling fits between those**, so this is not the
+answer and the change was reverted rather than the tests weakened.
+
+## The gap that remains open: a single impossible *report*
+
+Claude's "Still open" notes that with the per-event clamp gone, nothing bounds a
+single frame. **That is exactly where the remaining 290-degree jolt lives**, and
+a per-event bound is a different kind of test from the ones that failed:
+
+- The rule "**no fixed per-event size threshold**" is about using size to
+  *distinguish ambiguous cases*. That genuinely cannot work — the ranges overlap
+  and drift. Agreed, and it should stay in the rules.
+- This is narrower: a **ceiling for values that are impossible in one report**,
+  alongside the frame logic rather than replacing it.
+
+Why a report-level bound does not inherit the frame-rate problem: **a frame can
+legitimately carry a lot of movement because it contains many events, but a
+single `movementX` is one mouse report regardless of frame rate.** That is why
+the px/frame floor died and this does not.
+
+The separation in the current data:
+
+| | single-report magnitude |
+|---|---|
+| legitimate (capture 3) | up to **240 px** |
+| spurious (this capture) | **302-523 px** |
+
+and tightly clustered — 12 of the 49 anomalies in this capture have single-event
+maxima of exactly **480, 480, 483, 491, 493, 493, 497, 502, 507, 507, 513, 523**.
+
+`isSpuriousEvent` and `MAX_EVENT_STEP = 140` are still in `look.ts` but **no
+longer called from `game.ts`** — 140 was removed correctly, because it killed the
+100-240 px legitimate sweeps. **The answer is to raise it into the gap, not to
+drop it.** 280 px sits between 240 and 302.
+
+**Expect this to catch the large jolts and not the small ones** — it cannot see
+the 192-260 px spikes, which is why it supplements the frame logic rather than
+replacing it. Test both directions as always: spikes stopped *and* fast sweeps
+untouched.
+
+## Suggested next step
+
+1. Reinstate a per-event ceiling at ~280 px in the mousemove handler in
+   `game.ts`, alongside `lookGate.check()`.
+2. Re-run `npm run qa:camtrace` and confirm both directions hold.
+3. **Widen `dump()`'s surrounding-frame window** — Claude's note is right that
+   only one leak could be replayed because the window prints for the newest
+   anomaly only. Doing this first would make the next capture far more useful.
