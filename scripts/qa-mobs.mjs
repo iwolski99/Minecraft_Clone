@@ -13,6 +13,31 @@ export async function run(load) {
   const Projectile = mobsMod.ArrowMob ?? mobsMod.Arrow;
   const { Player } = await load('player/player.js');
 
+  /*
+   * Determinism.
+   *
+   * This suite used to fail about one run in four, on a different check each
+   * time - the save round-trip, "no entity fell through the world", "raycast
+   * finds an entity". None of them was a real defect; they were all downstream
+   * of randomness. `MobManager` seeds its own Rng from `Math.random()`
+   * (src/entities/mobmanager.ts:88), and `Entity` falls back to `Math.random()`
+   * too, so mob AI, wander directions and spawn positions differed on every run
+   * and the mobs ended up somewhere slightly different each time.
+   *
+   * That is right for the game and wrong for a test, so the suite pins
+   * `Math.random` itself rather than changing how the game seeds itself. The
+   * terrain is already seeded with 999; this makes the entities match.
+   */
+  const realRandom = Math.random;
+  let randomState = 0x9e3779b9;
+  Math.random = () => {
+    randomState = (randomState * 1664525 + 1013904223) >>> 0;
+    return randomState / 0x100000000;
+  };
+  const restoreRandom = () => {
+    Math.random = realRandom;
+  };
+
   let pass = 0;
   let fail = 0;
   const check = (name, cond, extra = '') => {
@@ -143,13 +168,29 @@ export async function run(load) {
 
   /* ---- persistence ---- */
   const snapshot = JSON.parse(JSON.stringify(mgr.serialize()));
-  const alive = mgr.entities.filter((e) => !e.dead && e.removeAt < 0).length;
+  /*
+   * Only count what can actually come back. `serialize()` writes every entity,
+   * but `deserialize()` rebuilds each one through `createMob()`, which has no
+   * spec for a projectile and rejects it - so an arrow in flight is saved and
+   * then silently dropped on load. Counting arrows as "alive" made this check
+   * demand something the code never promised, and it failed whenever a skeleton
+   * happened to get a shot off.
+   */
+  const live = mgr.entities.filter((e) => !e.dead && e.removeAt < 0);
+  const alive = live.length;
+  const persistable = live.filter((e) => e.kind !== 'projectile').length;
+  const inFlight = alive - persistable;
   const mgr2 = new MobManager(host);
   mgr2.deserialize(snapshot);
   check(
     'entities round-trip through save',
-    mgr2.entities.length >= Math.max(0, alive - 1),
-    `${mgr2.entities.length} restored, ${alive} alive`,
+    mgr2.entities.length >= Math.max(0, persistable - 1),
+    `${mgr2.entities.length} restored, ${persistable} persistable (${alive} alive, ${inFlight} projectiles cannot persist)`,
+  );
+  check(
+    'no projectile survives the round-trip',
+    mgr2.entities.every((e) => e.kind !== 'projectile'),
+    'a projectile was restored, so the persistable count above is wrong',
   );
   check('restored entities are positioned', mgr2.entities.every((e) => Number.isFinite(e.position.x)));
 
@@ -177,6 +218,7 @@ export async function run(load) {
   mgr2.dispose();
   check('dispose leaves no entities', mgr.entities.length === 0);
 
+  restoreRandom();
   console.log(`mobs: ${pass} passed, ${fail} failed  (sounds=${sounds} particles=${particles})`);
   if (fail > 0) process.exit(1);
 }

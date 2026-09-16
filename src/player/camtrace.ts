@@ -41,6 +41,34 @@ export interface TraceFrame {
   wantPitch: number;
   /** classification, empty when the frame is fully explained */
   note: '' | 'spike' | 'unexplained' | 'pitch-clamp' | 'relock' | 'no-input-turn';
+  /** how long the frame took, in ms - so px per frame can be read as px per second */
+  dtMs: number;
+  /** whether the pointer was locked while this frame was drawn */
+  locked: boolean;
+  /** whether the pointer lock changed hands during this frame */
+  lockEdge: boolean;
+}
+
+/**
+ * One pointer-lock transition.
+ *
+ * The trace previously recorded only that a transition had happened, which was
+ * enough to see 8-16 of them per session arriving in pairs ~100 ms apart and not
+ * enough to say anything about why. The direction of the edge, whether the
+ * document still had focus, and how long the previous state lasted are what
+ * distinguish the browser dropping the lock from this code releasing it.
+ */
+export interface LockEvent {
+  /** ms since the trace started */
+  t: number;
+  /** true when this edge acquired the lock, false when it lost it */
+  locked: boolean;
+  /** `document.hasFocus()` at the edge - a lost focus explains a lost lock */
+  focused: boolean;
+  /** `document.visibilityState === 'visible'` at the edge */
+  visible: boolean;
+  /** how long the previous lock state had lasted, in ms */
+  heldMs: number;
 }
 
 const RING = 900;
@@ -70,6 +98,14 @@ export class CameraTrace {
 
   /** set by the game when pointer lock changes, consumed by the next frame */
   private relockPending = false;
+
+  /** every pointer-lock transition, oldest first */
+  private readonly lockEvents: LockEvent[] = [];
+  /** current lock state, and when it was entered */
+  private lockedNow = false;
+  private lockSince = 0;
+  /** frames drawn while the pointer was not locked - the camera is frozen for these */
+  unlockedFrames = 0;
 
   /**
    * Note a mouse report that was discarded as impossible before it could affect
@@ -118,26 +154,86 @@ export class CameraTrace {
   }
 
   /**
+   * Record a pointer-lock transition with the context needed to explain it.
+   *
+   * `markRelock` only ever said "something happened". Whether the lock was lost
+   * or gained, whether the window still had focus, and how long the state before
+   * it lasted are what turn a pair of anonymous relocks into a diagnosis: a lost
+   * lock while focus was also lost is the OS or another window taking it, a lost
+   * lock with focus intact is the browser or this code, and the gap between the
+   * two edges is exactly how long the camera was frozen.
+   */
+  markLock(locked: boolean, focused: boolean, visible: boolean): void {
+    const t = Date.now() - this.start;
+    const heldMs = this.lockEvents.length === 0 ? 0 : t - this.lockSince;
+    this.lockEvents.push({ t, locked, focused, visible, heldMs });
+    if (this.lockEvents.length > 200) this.lockEvents.shift();
+    this.lockedNow = locked;
+    this.lockSince = t;
+    this.markRelock();
+  }
+
+  /** Every recorded lock transition. For tests. */
+  locks(): readonly LockEvent[] {
+    return this.lockEvents;
+  }
+
+  /**
+   * Total time the pointer lock was absent while the trace was running.
+   *
+   * This is the upper bound on how much of the jagged sweep a lost lock can
+   * possibly account for: while unlocked the mousemove handler returns early, so
+   * the camera cannot move at all.
+   */
+  unlockedMs(): number {
+    let total = 0;
+    for (let i = 0; i < this.lockEvents.length; i++) {
+      const e = this.lockEvents[i];
+      if (e.locked && e.heldMs > 0 && i > 0 && !this.lockEvents[i - 1].locked) total += e.heldMs;
+    }
+    return total;
+  }
+
+  /**
    * Close the frame.
    *
    * `appliedYaw` is what the game actually added to the player's yaw this frame
    * (already signed), `wantYaw` what the clamped input called for. `eps` absorbs
    * float noise from the wrap and the clamp.
    */
-  endFrame(appliedYaw: number, wantYaw: number, appliedPitch: number, wantPitch: number, eps = 1e-9): void {
+  endFrame(
+    appliedYaw: number,
+    wantYaw: number,
+    appliedPitch: number,
+    wantPitch: number,
+    eps = 1e-9,
+    dtMs = 0,
+  ): void {
     const events = this.pendingEvents;
     const rawX = this.pendingRawX;
     const spikeX = this.pendingSpike;
     const relock = this.relockPending;
 
+    /*
+     * A lock transition must not hide anything.
+     *
+     * This used to test `relock` first, so a frame that both changed lock state
+     * and turned by an amount the input could not account for was filed as
+     * 'relock' and never counted as unexplained - and the same for a spike. The
+     * whole case for "the look code is innocent" rests on `unexplained 0` across
+     * three captures, and those captures contain 8-16 relock frames each: the one
+     * kind of frame most under suspicion was the one kind exempt from the check.
+     * The lock edge is now recorded alongside the classification instead of
+     * replacing it, and 'relock' is only the verdict when nothing worse applies.
+     */
     let note: TraceFrame['note'] = '';
     const dz = Math.abs(appliedYaw - wantYaw);
     const dp = Math.abs(appliedPitch - wantPitch);
-    if (relock) note = 'relock';
-    else if (dz > eps) note = 'unexplained';
+    if (dz > eps) note = 'unexplained';
     else if (spikeX > 0 && spikeX > 180) note = 'spike';
     else if (dp > eps) note = 'pitch-clamp';
     else if (events === 0 && Math.abs(appliedYaw) > eps) note = 'no-input-turn';
+    else if (relock) note = 'relock';
 
     const frame: TraceFrame = {
       t: Date.now() - this.start,
@@ -149,7 +245,11 @@ export class CameraTrace {
       dPitch: appliedPitch,
       wantPitch,
       note,
+      dtMs,
+      locked: this.lockedNow,
+      lockEdge: relock,
     };
+    if (!this.lockedNow) this.unlockedFrames++;
     this.ring.push(frame);
     if (this.ring.length > RING) this.ring.shift();
 
@@ -184,7 +284,7 @@ export class CameraTrace {
     const latest = a
       ? `  latest ${a.note} @${(a.t / 1000).toFixed(1)}s dYaw ${a.dYaw.toFixed(4)} want ${a.wantYaw.toFixed(4)} events ${a.events} spike ${a.spikeX.toFixed(0)}`
       : '  no anomalies';
-    return `camera trace: ${t.frames}f  gated ${this.gatedFrames}f (max ${t.worstRejected.toFixed(0)}px)  unexplained ${t.unexplained}  no-input ${t.noInputTurns}  relock ${t.relocks}  worst ${t.worstUnexplained.toFixed(4)}rad\n${latest}`;
+    return `camera trace: ${t.frames}f  gated ${this.gatedFrames}f (max ${t.worstRejected.toFixed(0)}px)  unexplained ${t.unexplained}  no-input ${t.noInputTurns}  relock ${t.relocks} (${this.unlockedMs()}ms unlocked, ${this.unlockedFrames}f frozen)  worst ${t.worstUnexplained.toFixed(4)}rad\n${latest}`;
   }
 
   /**
@@ -227,12 +327,123 @@ export class CameraTrace {
         );
       }
     }
+    lines.push('');
+    lines.push(...this.lockReport());
+    lines.push('');
+    lines.push(...this.stallReport());
     if (!this.ring.some((f) => f.note)) {
       lines.push('');
       lines.push('(no anomalies recorded - if the camera still jolted, the cause is');
       lines.push(' not a rotation the input cannot account for)');
     }
     return lines.join('\n');
+  }
+
+  /**
+   * Every pointer-lock transition, with the state around it.
+   *
+   * The captures show these arriving in pairs about 100 ms apart, which is the
+   * shape of the lock being lost and immediately regained - and while it is lost
+   * the mousemove handler returns early, so the camera cannot move at all. This
+   * says which edge is which, whether the window still had focus across it, and
+   * exactly how long the gap was.
+   */
+  lockReport(): string[] {
+    const lines: string[] = ['# pointer lock transitions'];
+    if (this.lockEvents.length === 0) {
+      lines.push('(none recorded)');
+      return lines;
+    }
+    lines.push(`total time unlocked ${this.unlockedMs()} ms over ${this.lockEvents.length} transitions`);
+    lines.push(`frames drawn while unlocked ${this.unlockedFrames} of ${this.totals.frames}`);
+    lines.push('t_ms edge focused visible held_ms');
+    for (const e of this.lockEvents) {
+      lines.push(
+        `${e.t} ${e.locked ? 'ACQUIRED' : 'LOST    '} ${e.focused ? 'focus' : 'NOFOCUS'} ${e.visible ? 'visible' : 'HIDDEN '} ${e.heldMs}`,
+      );
+    }
+    return lines;
+  }
+
+  /**
+   * Runs of consecutive frames that received no mouse input at all, correlated
+   * against the lock transitions.
+   *
+   * This is the measurement that separates the two theories of the jagged sweep.
+   * If the stalls line up with unlocked windows, the lock is the cause and no
+   * amount of input filtering will help. If they do not, the camera is being
+   * starved of input for some other reason - and the gate, which also produces
+   * zero-movement frames, is the first suspect.
+   */
+  stallReport(): string[] {
+    const lines: string[] = ['# runs of frames with no mouse input'];
+    const runs: { from: number; to: number; frames: number; ms: number; unlocked: number }[] = [];
+    let i = 0;
+    while (i < this.ring.length) {
+      if (this.ring[i].events !== 0) {
+        i++;
+        continue;
+      }
+      let j = i;
+      let unlocked = 0;
+      let ms = 0;
+      while (j < this.ring.length && this.ring[j].events === 0) {
+        if (!this.ring[j].locked) unlocked++;
+        ms += this.ring[j].dtMs;
+        j++;
+      }
+      // A single quiet frame is just a still hand; a run is a stall.
+      if (j - i >= 2) {
+        runs.push({ from: this.ring[i].t, to: this.ring[j - 1].t, frames: j - i, ms, unlocked });
+      }
+      i = j;
+    }
+    if (runs.length === 0) {
+      lines.push('(none - every frame received mouse input)');
+      return lines;
+    }
+    const explained = runs.filter((r) => r.unlocked > 0).length;
+    lines.push(`${runs.length} runs, ${explained} overlap an unlocked window, ${runs.length - explained} do not`);
+    lines.push('from_ms to_ms frames ms unlocked_frames');
+    for (const r of runs.slice(-40)) {
+      lines.push(`${r.from} ${r.to} ${r.frames} ${r.ms.toFixed(0)} ${r.unlocked}`);
+    }
+    lines.push(...this.gapReport());
+    return lines;
+  }
+
+  /**
+   * Stretches where the trace stopped recording altogether.
+   *
+   * Losing the pointer lock calls `pause()`, which stops the frame loop - so a
+   * lock-induced stall leaves no zero-input frames to find, only a hole in the
+   * timeline. Without this the stall report would confidently find nothing and
+   * the lock theory would look disproved when it had simply been invisible. A
+   * gap bracketed by a LOST/ACQUIRED pair is the signature being looked for.
+   */
+  gapReport(): string[] {
+    const lines: string[] = ['# gaps in the recording (the frame loop stopped)'];
+    const gaps: { from: number; to: number; ms: number }[] = [];
+    for (let i = 1; i < this.ring.length; i++) {
+      const prev = this.ring[i - 1];
+      const cur = this.ring[i];
+      const expected = Math.max(prev.dtMs, cur.dtMs, 1);
+      const actual = cur.t - prev.t;
+      // Generous: only a gap several frames long is worth reporting.
+      if (actual > expected * 3 + 50) gaps.push({ from: prev.t, to: cur.t, ms: actual });
+    }
+    if (gaps.length === 0) {
+      lines.push('(none - the frame loop ran continuously)');
+      return lines;
+    }
+    lines.push(`${gaps.length} gaps`);
+    lines.push('from_ms to_ms ms lock_edges_inside');
+    for (const g of gaps.slice(-20)) {
+      const inside = this.lockEvents.filter((e) => e.t >= g.from && e.t <= g.to);
+      const desc = inside.length === 0 ? 'none' : inside.map((e) => (e.locked ? 'ACQUIRED' : 'LOST')).join('+');
+      lines.push(`${g.from} ${g.to} ${g.ms} ${desc}`);
+    }
+    return lines;
   }
 
   /** Every frame recorded, oldest first. For tests. */
@@ -257,5 +468,9 @@ export class CameraTrace {
     this.totals.worstRejected = 0;
     this.rejectedEvents = 0;
     this.gatedFrames = 0;
+    this.lockEvents.length = 0;
+    this.lockedNow = false;
+    this.lockSince = 0;
+    this.unlockedFrames = 0;
   }
 }

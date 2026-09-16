@@ -61,6 +61,56 @@ export const GATE_FLOOR = 260;
 export const GATE_RATIO = 3;
 
 /**
+ * Slowest motion that may ever be gated, in mouse pixels per **second**.
+ *
+ * The unit is the whole point. The previous floor was 70 px per *frame*, which
+ * is not a speed at all - it is a speed multiplied by the frame time, so the
+ * same physical turn of the mouse was judged differently depending on how fast
+ * the machine happened to be drawing:
+ *
+ *   120 FPS   70 px/frame = 8400 px/s   (635 deg/s - never reached)
+ *    60 FPS   70 px/frame = 4200 px/s   (318 deg/s - never reached)
+ *    24 FPS   70 px/frame = 1680 px/s   (127 deg/s - an ordinary turn)
+ *    12 FPS   70 px/frame =  840 px/s   ( 64 deg/s - a slow turn)
+ *
+ * Measured against a realistic session (noisy acceleration into a turn, at the
+ * 20-26 FPS this game actually runs at) that floor rejected the *first frame of
+ * every turn* - 12 frames in 30 seconds, each discarding 5-8 degrees the player
+ * had asked for. The rejected frames were routinely *smaller* than the frames
+ * accepted immediately after them:
+ *
+ *   ... 30 47 60 60  >>78 rejected<<  89 122 98 accepted ...
+ *
+ * That is the "camera catches on something" the player reported, and it was the
+ * gate doing it. It is the same mistake as the per-frame cap that came before,
+ * in a different place: `MAX_FRAME_LOOK` was caught, this was not, because the
+ * frame-rate check never actually drove the gate.
+ *
+ * The value was chosen by sweeping it against both directions at once rather
+ * than picked: legitimate deferrals on a realistic session, against whether the
+ * five real captured spike patterns are still stopped.
+ *
+ *   floor px/s | deg/s | legit deferrals | legit deg lost | captured spikes stopped
+ *         2000 |   151 |              12 |           0.00 | 5/5
+ *         3000 |   227 |               4 |           0.00 | 5/5
+ *         3500 |   265 |               0 |           0.00 | 5/5
+ *         5000 |   378 |               0 |           0.00 | 3/5, worst leak 14.5 deg
+ *
+ * 3500 px/s is about 265 deg/s at the player's sensitivity. The fastest
+ * legitimate motion measured sits below it, so ordinary turning - and even a
+ * fast sweep - is never examined at all; the smallest spurious frame in any
+ * capture (183 px in ~45 ms, 4067 px/s) sits above it. Above 4000 the margin is
+ * gone and the real spikes come back.
+ */
+export const GATE_FLOOR_RATE = 3500;
+
+/** Frame time used when a caller does not supply one. */
+const NOMINAL_DT = 1 / 60;
+/** Frame times outside this range are clamped before being used as a divisor. */
+const MIN_DT = 1 / 240;
+const MAX_DT = 1 / 5;
+
+/**
  * Rejects spurious look movement by comparing each frame with recent frames.
  *
  * Three captures have now shown that no size threshold can work, because the two
@@ -81,36 +131,71 @@ export const GATE_RATIO = 3;
  * contrast, is uniformly fast: its median rises with it, so it never looks like
  * an outlier against its own recent history.
  *
- * This is self-calibrating. There is no fixed number that goes stale when the
- * mouse, the sensitivity or the player's habits change, which is precisely how
- * the previous two attempts failed.
+ * Two things are measured in **rates**, not per-frame amounts, so that the same
+ * physical motion is judged identically at 12 FPS and at 120 - see
+ * `GATE_FLOOR_RATE` for what went wrong when they were not.
+ *
+ * **Nothing legitimate is ever discarded, only deferred.** A frame that trips
+ * the gate is not thrown away: its movement is *held*. If the next frame is also
+ * fast the motion was real - a genuine sweep - and the held movement is released
+ * in full, so the player loses none of their turn, only one frame of latency. If
+ * the next frame is back to normal the large frame was a lone impulse, which no
+ * hand produces, and only then is it dropped. That is the difference between
+ * this and every previous attempt: the earlier gates discarded immediately and
+ * irreversibly, so every misjudgement cost the player real movement.
  */
 export class LookGate {
-  /** magnitudes of recent frames, the baseline an outlier is judged against */
+  /** rates of recent frames in px/s, the baseline an outlier is judged against */
   private readonly recent: number[] = [];
   private static readonly WINDOW = 24;
-  /** a frame below this is never rejected, however unusual */
-  private static readonly FLOOR = 70;
+  /** motion slower than this is never gated, however unusual - px per second */
+  private static readonly FLOOR_RATE = GATE_FLOOR_RATE;
   /** how far above the recent median a frame must be to count as spurious */
   private static readonly RATIO = 8;
+  /**
+   * How much of the held frame's own limit the next frame must reach for the
+   * motion to count as sustained, and the held movement to be released.
+   */
+  private static readonly SUSTAIN = 0.5;
+  /**
+   * How many consecutive sustained frames must follow a held one before the
+   * held movement is believed and released.
+   *
+   * One is not enough. A captured session shows a 212 px spurious report held
+   * correctly, and then a *second* spurious report 41 ms later - which the gate
+   * read as the motion continuing, so it released the held movement plus the new
+   * frame's and applied 360 px, 27 degrees, in a single frame. The assumption
+   * that "a spike is lone and a sweep is a run" is simply false for this mouse:
+   * the spurious reports arrive in bursts, four inside 213 ms in the same
+   * capture.
+   *
+   * Two confirming frames costs a genuine hard flick two frames of latency and
+   * nothing else - the movement is still released in full. Measured against a
+   * realistic session the gate is not reached at all, so that cost is never paid
+   * in ordinary play.
+   */
+  private static readonly CONFIRM = 2;
+  /** Never hold movement longer than this, however ambiguous it looks. */
+  private static readonly MAX_HOLD = 3;
 
-  /** Frames rejected as spurious, and the largest rejected magnitude. */
+  /** Frames held back as suspect, and the largest held magnitude. */
   rejected = 0;
   worstRejected = 0;
   /** Frames accepted, and the largest accepted magnitude - for cross-checking. */
   accepted = 0;
   worstAccepted = 0;
-  /**
-   * Consecutive rejections.
-   *
-   * A spurious report is a *lone* frame; a fast sweep is a *run* of them. Without
-   * this, a player who held a genuinely fast turn would be locked out forever:
-   * rejected frames never enter the baseline, so the median stays at the old low
-   * value and every subsequent fast frame is judged against it. The second
-   * consecutive large frame is therefore taken as real, and the baseline is
-   * rebuilt from it.
-   */
-  private consecutiveRejects = 0;
+  /** Held frames later released as real motion, and those confirmed spurious. */
+  released = 0;
+  discarded = 0;
+
+  /** movement held from the previous frame(s), pending a verdict */
+  private heldX = 0;
+  private heldY = 0;
+  private heldRate = 0;
+  private holding = false;
+  /** frames spent holding, and consecutive frames that looked sustained */
+  private holdFrames = 0;
+  private sustainRun = 0;
 
   private median(): number {
     if (this.recent.length === 0) return 0;
@@ -119,33 +204,85 @@ export class LookGate {
   }
 
   /**
-   * Judge one frame's accumulated look delta. Returns [0, 0] when the frame is
-   * rejected, which drops that frame's rotation entirely.
+   * Judge one frame's accumulated look delta.
+   *
+   * `dt` is the frame's duration in seconds; it converts the delta into a speed
+   * so the judgement does not depend on the frame rate. Returns the movement to
+   * apply, which may include movement held back from the previous frame.
    */
-  check(dx: number, dy: number): [number, number] {
+  check(dx: number, dy: number, dt: number = NOMINAL_DT): [number, number] {
     if (!Number.isFinite(dx) || !Number.isFinite(dy)) return [0, 0];
+    const step = Number.isFinite(dt) && dt > 0 ? Math.min(MAX_DT, Math.max(MIN_DT, dt)) : NOMINAL_DT;
     const mag = Math.hypot(dx, dy);
+    const rate = mag / step;
+
+    // Settle whatever the previous frame(s) held back before judging this one.
+    if (this.holding) {
+      const sustained = rate >= this.heldRate * LookGate.SUSTAIN;
+      if (sustained && this.holdFrames < LookGate.MAX_HOLD) {
+        this.sustainRun++;
+        if (this.sustainRun >= LookGate.CONFIRM) {
+          // Believed: a real sweep. Give back everything, and rebuild the
+          // baseline around the new rate rather than the slow motion before it.
+          const outX = dx + this.heldX;
+          const outY = dy + this.heldY;
+          this.released++;
+          this.forget();
+          this.recent.length = 0;
+          this.recent.push(rate);
+          this.accepted++;
+          if (mag > this.worstAccepted) this.worstAccepted = mag;
+          return [outX, outY];
+        }
+        // Not yet confirmed - keep holding, and hold this frame too.
+        this.heldX += dx;
+        this.heldY += dy;
+        this.holdFrames++;
+        return [0, 0];
+      }
+      // The motion did not continue, or it has been ambiguous for too long:
+      // a lone impulse, or a burst of them. Drop all of it.
+      this.discarded++;
+      this.forget();
+      // and fall through to judge this frame on its own merits
+    }
+
     const med = this.median();
-    const limit = Math.max(LookGate.FLOOR, med * LookGate.RATIO);
-    if (mag > limit && this.recent.length >= 4 && this.consecutiveRejects === 0) {
+    const limit = Math.max(LookGate.FLOOR_RATE, med * LookGate.RATIO);
+    if (rate > limit && this.recent.length >= 4) {
+      // Suspect, but not yet condemned: hold it and let the next frame decide.
       this.rejected++;
-      this.consecutiveRejects++;
+      this.holding = true;
+      this.heldX = dx;
+      this.heldY = dy;
+      this.heldRate = rate;
+      this.holdFrames = 1;
+      this.sustainRun = 0;
       if (mag > this.worstRejected) this.worstRejected = mag;
-      // A rejected frame deliberately does not enter the baseline, or one spike
+      // A held frame deliberately does not enter the baseline, or one spike
       // would raise the bar enough to let its successors through.
       return [0, 0];
     }
-    // Accepted, either as ordinary movement or as the second frame of a run -
-    // in which case the baseline is rebuilt so the new rate becomes the norm.
-    if (this.consecutiveRejects > 0) {
-      this.consecutiveRejects = 0;
-      this.recent.length = 0;
-    }
-    this.recent.push(mag);
+    this.recent.push(rate);
     if (this.recent.length > LookGate.WINDOW) this.recent.shift();
     this.accepted++;
     if (mag > this.worstAccepted) this.worstAccepted = mag;
     return [dx, dy];
+  }
+
+  /**
+   * Abandon any held movement.
+   *
+   * Called when the pointer lock changes hands: movement captured before the
+   * transition must never be released into the frame after it.
+   */
+  forget(): void {
+    this.holding = false;
+    this.heldX = 0;
+    this.heldY = 0;
+    this.heldRate = 0;
+    this.holdFrames = 0;
+    this.sustainRun = 0;
   }
 
   reset(): void {
@@ -154,7 +291,9 @@ export class LookGate {
     this.worstRejected = 0;
     this.accepted = 0;
     this.worstAccepted = 0;
-    this.consecutiveRejects = 0;
+    this.released = 0;
+    this.discarded = 0;
+    this.forget();
   }
 }
 

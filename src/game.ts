@@ -474,10 +474,23 @@ export class Game {
       // per frame against recent history - see LookGate for why a per-event size
       // test cannot work: the spurious and legitimate ranges overlap.
       this.cameraTrace.recordEvent(rawX, rawY);
-      const dx = clampLookDelta(rawX);
-      const dy = clampLookDelta(rawY);
-      this.lookDeltaX += dx;
-      this.lookDeltaY += dy;
+      /*
+       * Deliberately NOT clamped per event any more.
+       *
+       * The +/-180 clamp was hiding the bug from the thing meant to catch it. A
+       * captured session shows eight jolts that applied exactly 180 px - every
+       * one a single spurious report of 183-543 px truncated to exactly the
+       * clamp. 543 px in one frame is 12000 px/s and unmistakable; 180 px is
+       * 2100-4000 px/s at this game's frame times, which is ordinary fast
+       * turning. The clamp took an impossible report and handed the gate a
+       * plausible one, so the gate passed it and the player got 13.6 degrees.
+       *
+       * The gate judges the frame's true magnitude instead. Bounding the size
+       * here cannot help anyway: it caps the jolt without removing it, which is
+       * what "reduced the jolts from 141 to 11 degrees" meant.
+       */
+      this.lookDeltaX += rawX;
+      this.lookDeltaY += rawY;
     });
     this.canvas.addEventListener('mousedown', (e) => {
       if (!this.running) return;
@@ -506,7 +519,17 @@ export class Game {
        */
       this.lookDeltaX = 0;
       this.lookDeltaY = 0;
-      this.cameraTrace.markRelock();
+      // Movement the gate was holding belongs to the old lock - releasing it
+      // into the frame after a transition would be a jolt with no input behind it.
+      this.lookGate.forget();
+      /*
+       * Record the edge, not just that something happened. The captures show
+       * these arriving in pairs ~100 ms apart and the old `markRelock()` could
+       * not say which was the loss and which the recovery, nor whether the
+       * window had kept focus across them - which is the difference between the
+       * OS taking the lock and this code releasing it.
+       */
+      this.cameraTrace.markLock(this.pointerLocked, document.hasFocus(), document.visibilityState === 'visible');
       if (!this.pointerLocked && this.running && !this.containers.isOpen && !this.screens.isOpen) {
         this.pause();
       }
@@ -1219,7 +1242,7 @@ export class Game {
        * frame's total with recent ones - see LookGate for why a size threshold
        * cannot work.
        */
-      const [gx, gy] = this.lookGate.check(this.lookDeltaX, this.lookDeltaY);
+      const [gx, gy] = this.lookGate.check(this.lookDeltaX, this.lookDeltaY, dt);
       this.cameraTrace.noteGate(gx === 0 && gy === 0 && (this.lookDeltaX !== 0 || this.lookDeltaY !== 0));
       const wantYaw = -gx * sens;
       const wantPitch = -gy * sens;
@@ -1233,7 +1256,7 @@ export class Game {
       this.player.pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, this.player.pitch));
       const appliedPitch = this.player.pitch - beforePitch;
       this.player.yaw = wrapYaw(this.player.yaw);
-      this.cameraTrace.endFrame(appliedYaw, wantYaw, appliedPitch, wantPitch, 1e-6);
+      this.cameraTrace.endFrame(appliedYaw, wantYaw, appliedPitch, wantPitch, 1e-6, dt * 1000);
     }
     // Reset unconditionally: while paused, deltas used to accumulate and then
     // land as one large jolt the moment the game resumed.
