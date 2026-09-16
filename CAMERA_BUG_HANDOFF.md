@@ -253,3 +253,83 @@ untouched.
 3. **Widen `dump()`'s surrounding-frame window** — Claude's note is right that
    only one leak could be replayed because the window prints for the newest
    anomaly only. Doing this first would make the next capture far more useful.
+
+---
+
+# Reply to the addendum
+
+The leak was real and the diagnosis of *where* was exactly right. Fixed in
+`69c76ba`. Two corrections to the suggested remedy, both measured.
+
+## What the defect actually was
+
+The confirmation test was **one-sided**:
+
+```ts
+const sustained = rate >= this.heldRate * SUSTAIN;
+```
+
+It asked only whether the new frame was not much *smaller* than the held one.
+Your reading — "confirmation answers *did the motion continue?*; nothing answers
+*could the mouse have moved that far at all?*" — is precisely it.
+
+The fix is to require the rates to be comparable in **both** directions. Real
+motion is continuous, so a frame far larger than the one before it is not a
+continuation, it is a new impulse. It stays a ratio between two rates, so it
+stays frame-rate independent and adds no new size threshold.
+
+Reproduced at **328° before, 0° after**. The 73° and 44° frames that followed it
+in your capture also go to 0 — they were passing because the release had
+rewritten the baseline, which is the second half of the same defect.
+
+## The per-event ceiling would not have fixed these leaks
+
+This is the part worth carrying forward. **The frames that leaked are not one
+impossible report — they are many large ones.** Dropping only the biggest event:
+
+| frame | events | raw | biggest | left after dropping it |
+|---|---|---|---|---|
+| 41465 | 14 | 3170 | 507 | **2663 px = 201°** |
+| 41834 | 7 | 972 | 480 | 492 px = 37° |
+| 35376 | 5 | 582 | 497 | 85 px = 6.4° |
+
+A 280 px ceiling would have turned the 290° jolt into a **201°** one. 41465
+carries 14 events averaging 226 px each; no single-report bound sees that.
+
+The reasoning about report-level bounds not inheriting the px/frame problem is
+sound in itself — it just does not address these frames. `MAX_EVENT_STEP` stays
+in `look.ts`, still uncalled.
+
+## The capture's real pattern is now fully handled
+
+Replaying all six of your large frames with ordinary motion between them (they
+are 369 ms apart, not consecutive): **all six held and discarded, worst applied
+frame 2.3°**.
+
+## One thing I tried and removed
+
+Reseeding the baseline from the bounded limit rather than the released rate.
+Measured, it makes **no difference** — the median washes the seed out within
+three frames either way — and no mutation of it could be made to fail a test.
+Removed rather than kept as an unpinnable change. Clearing the baseline on
+release is separately pinned: keeping the pre-sweep frames makes the gate
+oscillate (hold, hold, release triple-size) for as long as the player turns.
+
+## Done
+
+- `dump()` now prints the run-up around **six** anomalies, not just the newest.
+  Your point and mine — it cost two rounds of investigation.
+- `qa:camtrace` 99 → **107**. Mutation-tested: restoring the one-sided test
+  reproduces the 290° release; not clearing the baseline reproduces the
+  oscillation.
+
+## The residual, stated honestly
+
+**Three consecutive frames of comparable, impossible magnitude will still be
+released** — 3 × 1200 px applies 272°. Your capture contains no such run, and
+the observed bursts alternate large/small rather than staying comparable, so
+this is not currently reachable. But it is the irreducible core of the problem:
+three comparable large frames in a row are genuinely indistinguishable from a
+hard flick, and no threshold separates them without cutting real input. If a
+future capture shows one, that is the case to bring — with the wider dump
+window, it will now come with its run-up attached.
