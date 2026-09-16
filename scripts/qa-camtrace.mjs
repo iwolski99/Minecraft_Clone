@@ -27,6 +27,8 @@ export async function run(load) {
   const info = (m) => console.log(`  . ${m}`);
 
   const SENS = 0.0022;
+  /** the frame time the real captures were taken at */
+  const DT_CAP = 0.045;
 
   /** One ordinary frame: feed events, then close with the rotation they imply. */
   const normalFrame = (tr, dx, dy) => {
@@ -122,7 +124,27 @@ export async function run(load) {
     check('the dump names the header', dump.includes('CubeWorld camera trace'));
     check('the dump reports the worst rotation', dump.includes('worst unexplained rotation'));
     check('the dump includes the anomaly table', dump.includes('anomalies (newest first)'));
-    check('the dump includes the surrounding frames', dump.includes('frames around the newest anomaly'));
+    check('the dump includes the surrounding frames', dump.includes('frames around the anomaly at'));
+
+    /*
+     * And around SEVERAL anomalies, not just the newest. Printing one window
+     * meant a capture with nineteen leaks yielded exactly one that could be
+     * replayed, because the rest had no neighbours recorded - and a frame's
+     * neighbours are the whole diagnosis here.
+     */
+    const many = new CameraTrace();
+    for (let i = 0; i < 300; i++) {
+      if (i % 50 === 25) {
+        many.recordEvent(900, 0); // an anomaly every 50 frames
+        many.endFrame(-1.98, -1.98, 0, 0, 1e-6, 45);
+      } else {
+        many.recordEvent(8, 0);
+        many.endFrame(-0.0176, -0.0176, 0, 0, 1e-6, 45);
+      }
+    }
+    const windows = many.dump().split('\n').filter((l) => l.startsWith('# frames around the anomaly at')).length;
+    info(`a trace with 6 spread-out anomalies prints ${windows} windows`);
+    check('several anomalies get their run-up printed', windows >= 5, String(windows));
     check('the dump has no empty handler noise', !dump.includes('undefined'));
 
     const clean = new CameraTrace();
@@ -663,6 +685,70 @@ export async function run(load) {
     }
     info(`a sustained 500 px/frame turn applies ${appliedRun} of ${wantedRun} px`);
     check('a sustained fast turn is never locked out', appliedRun === wantedRun, `${appliedRun}/${wantedRun}`);
+  }
+
+  /* ---- 16b. the release path must not apply an unexamined frame ---- */
+  {
+    /*
+     * A 673-frame capture caught the defer design releasing 3844 px in a single
+     * frame - 5.074 rad, 290 degrees. Two defects, both here:
+     *
+     *   1. The confirmation test was one-sided. It asked only whether the new
+     *      frame was not much SMALLER than the held one, so a frame seventeen
+     *      times LARGER passed trivially and was then applied in full. It
+     *      answered "did the motion continue?" and nothing answered "could the
+     *      mouse have moved that far at all?".
+     *
+     *   2. Releasing reseeded the baseline with the released rate, so one spike
+     *      rewrote what counted as normal and essentially nothing could be gated
+     *      for the next 24 frames. In the capture that is why the 290 degree
+     *      frame was followed by 73 and 44 degree frames passing untouched.
+     */
+    const { LookGate } = await load('player/look.js');
+    const SENS_REAL = 0.00132;
+    const deg = (px) => (px * SENS_REAL * 180) / Math.PI;
+
+    const g = new LookGate();
+    for (const v of [10, 12, 9, 11, 10, 13, 9, 12]) g.check(v, 0, DT_CAP);
+    const held = g.check(200, 0, DT_CAP)[0];      // trips the gate, held
+    const huge = g.check(3170, 0, DT_CAP)[0];     // 17x larger - NOT a continuation
+    const after1 = g.check(972, 0, DT_CAP)[0];
+    const after2 = g.check(582, 0, DT_CAP)[0];
+    const after3 = g.check(300, 0, DT_CAP)[0];
+    const worst = Math.max(held, huge, after1, after2, after3);
+    info(`captured 290 deg release: frames apply ${held}/${huge}/${after1}/${after2}/${after3} px, worst ${deg(worst).toFixed(1)} deg`);
+    check('a frame far larger than the held one is not confirmation', huge === 0, String(huge));
+    check('the captured 290 degree release is gone', deg(worst) < 5, `${deg(worst).toFixed(1)} deg`);
+    check('and the frames after it are not whitelisted', after2 === 0 && after3 === 0, `${after2}/${after3}`);
+
+    /*
+     * The baseline after a LEGITIMATE release must not be raised so far that a
+     * spike arriving moments later sails through. This is the other half of
+     * defect 2, and it is the direction a test would miss if it only checked
+     * that sweeps survive.
+     */
+    const g2 = new LookGate();
+    for (const v of [10, 12, 9, 11, 10, 13, 9, 12]) g2.check(v, 0, DT_CAP);
+    let sweepApplied = 0;
+    for (let i = 0; i < 12; i++) sweepApplied += g2.check(200, 0, DT_CAP)[0];
+    check('a genuine sustained sweep still comes through in full', sweepApplied === 2400, String(sweepApplied));
+    const spikeAfterSweep = g2.check(3000, 0, DT_CAP)[0];
+    const settleAfter = g2.check(190, 0, DT_CAP)[0];
+    info(`a 3000 px spike right after a legitimate sweep applies ${spikeAfterSweep} px`);
+    check('a spike just after a legitimate sweep is still caught', spikeAfterSweep === 0, String(spikeAfterSweep));
+    check('and does not leak into the frame after it', settleAfter === 190, String(settleAfter));
+
+    /*
+     * The gate must still not oscillate. Seeding the baseline correctly but
+     * forgetting to clear it makes the very next frame of the same sweep trip
+     * again - hold, hold, release triple-size, repeat - which loses nothing and
+     * feels terrible, so count the releases rather than the pixels.
+     */
+    const g3 = new LookGate();
+    for (const v of [10, 12, 9, 11, 10, 13, 9, 12]) g3.check(v, 0, DT_CAP);
+    for (let i = 0; i < 40; i++) g3.check(200, 0, DT_CAP);
+    info(`a 40-frame sustained sweep holds ${g3.rejected} times`);
+    check('a sustained sweep settles instead of oscillating', g3.rejected <= 2, `${g3.rejected} holds`);
   }
 
   /* ---- 17. a lock change must not hide anything ---- */

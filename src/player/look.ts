@@ -155,6 +155,18 @@ export class LookGate {
   /**
    * How much of the held frame's own limit the next frame must reach for the
    * motion to count as sustained, and the held movement to be released.
+   *
+   * The test is deliberately two-sided. It used to ask only whether the new
+   * frame was not much *smaller* than the held one, which answers "did the
+   * motion continue?" and nothing else - so a frame seventeen times larger
+   * passed trivially and was then applied in full, unexamined. A 673-frame
+   * capture caught that releasing 3844 px in a single frame: 290 degrees.
+   *
+   * Real motion is continuous: a hand's speed changes smoothly from one frame to
+   * the next. A frame far larger than the one before it is not a continuation,
+   * it is a new impulse, and impulses are what this gate exists to stop. So the
+   * rates must be comparable in BOTH directions - within `1/SUSTAIN` either way.
+   * That is a ratio between two rates, so it stays frame-rate independent.
    */
   private static readonly SUSTAIN = 0.5;
   /**
@@ -218,7 +230,8 @@ export class LookGate {
 
     // Settle whatever the previous frame(s) held back before judging this one.
     if (this.holding) {
-      const sustained = rate >= this.heldRate * LookGate.SUSTAIN;
+      const sustained =
+        rate >= this.heldRate * LookGate.SUSTAIN && rate <= this.heldRate / LookGate.SUSTAIN;
       if (sustained && this.holdFrames < LookGate.MAX_HOLD) {
         this.sustainRun++;
         if (this.sustainRun >= LookGate.CONFIRM) {
@@ -228,6 +241,21 @@ export class LookGate {
           const outY = dy + this.heldY;
           this.released++;
           this.forget();
+          /*
+           * The baseline must be cleared and rebuilt around the new rate.
+           * Leaving the slow frames from before the sweep in it keeps the median
+           * low, so the very next frame of the same sweep trips the gate again
+           * and the gate oscillates - hold, hold, release triple-size, repeat -
+           * for as long as the player keeps turning. Nothing is lost that way,
+           * but it is exactly the stutter this design exists to avoid.
+           *
+           * Seeding it with the bounded limit instead of the released rate was
+           * tried, to stop one big release raising the bar for the frames after
+           * it. Measured, it makes no difference: the median washes the seed out
+           * within three frames either way, and the two-sided sustain test above
+           * already bounds what can be released. It was removed rather than kept
+           * as an unpinnable change.
+           */
           this.recent.length = 0;
           this.recent.push(rate);
           this.accepted++;

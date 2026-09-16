@@ -72,6 +72,10 @@ export interface LockEvent {
 }
 
 const RING = 900;
+/** how many anomalies get their surrounding frames printed in a dump */
+const WINDOWS = 6;
+/** how many frames either side of an anomaly to print */
+const SPAN = 12;
 
 export class CameraTrace {
   private readonly ring: TraceFrame[] = [];
@@ -308,22 +312,32 @@ export class CameraTrace {
         `${f.t} ${f.note} ${f.events} ${f.rawX.toFixed(1)} ${f.spikeX.toFixed(0)} ${f.dYaw.toFixed(6)} ${f.wantYaw.toFixed(6)} ${f.dPitch.toFixed(6)} ${f.wantPitch.toFixed(6)}`,
       );
     }
-    // the window around the newest anomaly, so the run-up is visible
-    let newest = -1;
-    for (let i = this.ring.length - 1; i >= 0; i--) {
-      if (this.ring[i].note !== '') {
-        newest = i;
-        break;
-      }
+    /*
+     * The run-up around several anomalies, not just the newest.
+     *
+     * This used to print one window, around the newest anomaly only, and that
+     * cost two rounds of investigation: a capture would contain nineteen leaks
+     * and exactly one of them could be replayed against real data, because the
+     * other eighteen had no surrounding frames to replay. What a frame's
+     * neighbours were is the whole diagnosis here - the same 480 px event is
+     * stopped or applied depending entirely on what preceded it.
+     */
+    const anomalyIndices: number[] = [];
+    for (let i = this.ring.length - 1; i >= 0 && anomalyIndices.length < WINDOWS; i--) {
+      if (this.ring[i].note === '') continue;
+      // skip one already covered by a printed window, so the windows spread out
+      if (anomalyIndices.some((j) => Math.abs(j - i) <= SPAN)) continue;
+      anomalyIndices.push(i);
     }
-    if (newest >= 0) {
+    for (const centre of anomalyIndices) {
       lines.push('');
-      lines.push('# frames around the newest anomaly');
-      for (let i = Math.max(0, newest - 12); i <= Math.min(this.ring.length - 1, newest + 12); i++) {
+      lines.push(`# frames around the anomaly at ${this.ring[centre].t} ms (${this.ring[centre].note})`);
+      lines.push('   t_ms note events rawX spike dt_ms locked dYaw want');
+      for (let i = Math.max(0, centre - SPAN); i <= Math.min(this.ring.length - 1, centre + SPAN); i++) {
         const f = this.ring[i];
-        const mark = i === newest ? '>>' : '  ';
+        const mark = i === centre ? '>>' : '  ';
         lines.push(
-          `${mark} ${f.t} ${f.note || '-'} events=${f.events} rawX=${f.rawX.toFixed(1)} spike=${f.spikeX.toFixed(0)} dYaw=${f.dYaw.toFixed(6)} want=${f.wantYaw.toFixed(6)}`,
+          `${mark} ${f.t} ${f.note || '-'} events=${f.events} rawX=${f.rawX.toFixed(1)} spike=${f.spikeX.toFixed(0)} dt=${f.dtMs.toFixed(0)} ${f.locked ? 'locked' : 'UNLOCKED'} dYaw=${f.dYaw.toFixed(6)} want=${f.wantYaw.toFixed(6)}`,
         );
       }
     }
